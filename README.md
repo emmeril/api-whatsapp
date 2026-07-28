@@ -28,6 +28,16 @@ Ubah `API_TOKEN` di `.env`, lalu jalankan:
 npm start
 ```
 
+### Menjalankan dengan PM2
+
+Pada server ini, simpan data PM2 di folder proyek agar writable:
+
+```bash
+PM2_HOME=/root/api-whatsapp/.pm2 pm2 start ecosystem.config.js
+PM2_HOME=/root/api-whatsapp/.pm2 pm2 save
+PM2_HOME=/root/api-whatsapp/.pm2 pm2 status
+```
+
 Jika Chromium bawaan tidak dapat berjalan pada server, pasang Chrome/Chromium dan isi `CHROME_EXECUTABLE_PATH` di `.env`.
 
 ### Menjalankan dengan Docker
