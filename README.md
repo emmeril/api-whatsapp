@@ -33,8 +33,7 @@ npm start
 Pada server ini, simpan data PM2 di folder proyek agar writable:
 
 ```bash
-PM2_HOME=/root/api-whatsapp/.pm2 pm2 start ecosystem.config.js
-PM2_HOME=/root/api-whatsapp/.pm2 pm2 save
+./scripts/pm2-start.sh
 PM2_HOME=/root/api-whatsapp/.pm2 pm2 status
 ```
 
