@@ -15,6 +15,9 @@ const config = {
   autoConnect: parseBoolean(process.env.AUTO_CONNECT, true),
   countryCode: (process.env.DEFAULT_COUNTRY_CODE || '62').replace(/\D/g, ''),
   chromeExecutablePath: process.env.CHROME_EXECUTABLE_PATH || undefined,
+  commandsFile: path.resolve(process.env.COMMANDS_FILE || '.data/commands.json'),
+  commandWebhookSecret: process.env.COMMAND_WEBHOOK_SECRET || '',
+  commandWebhookTimeoutMs: Number(process.env.COMMAND_WEBHOOK_TIMEOUT_MS || 10000),
 };
 
 function validateConfig() {
@@ -28,6 +31,14 @@ function validateConfig() {
 
   if (!config.countryCode) {
     throw new Error('DEFAULT_COUNTRY_CODE tidak valid');
+  }
+
+  if (
+    !Number.isInteger(config.commandWebhookTimeoutMs)
+    || config.commandWebhookTimeoutMs < 100
+    || config.commandWebhookTimeoutMs > 60000
+  ) {
+    throw new Error('COMMAND_WEBHOOK_TIMEOUT_MS harus antara 100 dan 60000');
   }
 }
 

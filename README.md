@@ -10,6 +10,8 @@ REST API pengiriman WhatsApp bergaya Fonnte yang dibuat dengan Node.js, Express,
 - Status perangkat, connect, dan logout
 - Autentikasi token melalui header `Authorization`, `token`, atau `x-api-key`
 - Kirim teks, media dari URL, atau file base64
+- Auto-reply command seperti `/start`, dengan respons statis atau webhook dinamis
+- Penyimpanan konfigurasi command secara persisten
 - Normalisasi nomor lokal Indonesia secara otomatis
 - Endpoint ringkas `POST /send` seperti pola integrasi Fonnte
 
@@ -179,6 +181,108 @@ curl -X POST http://localhost:3000/send \
 
 Ukuran body request dibatasi 25 MB. Untuk file besar, gunakan URL atau sesuaikan limit pada `src/app.js` dengan mempertimbangkan kapasitas server.
 
+## Command dan auto-reply
+
+Pesan masuk yang diawali `/` akan diperiksa sebagai command. Command `/start`
+tersedia secara default dan langsung membalas ketika WhatsApp sudah terhubung.
+Daftar command dapat dilihat melalui:
+
+```bash
+curl http://localhost:3000/api/commands \
+  -H "Authorization: Bearer TOKEN_ANDA"
+```
+
+### Balasan teks statis
+
+Buat atau perbarui command dengan `POST /api/commands`. Tanda `/` pada nama
+command boleh disertakan atau dihilangkan.
+
+```bash
+curl -X POST http://localhost:3000/api/commands \
+  -H "Authorization: Bearer TOKEN_ANDA" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command":"/help",
+    "response":"Command tersedia: /start, /help, /status",
+    "description":"Menampilkan bantuan",
+    "enabled":true
+  }'
+```
+
+Setelah itu, pesan WhatsApp `/help` akan otomatis mendapat balasan dari nilai
+`response`. Konfigurasi disimpan pada `.data/commands.json`, atau lokasi yang
+ditentukan melalui `COMMANDS_FILE`, sehingga tidak hilang saat server restart.
+
+Command dapat diperbarui atau dihapus melalui:
+
+```bash
+curl -X PUT http://localhost:3000/api/commands/help \
+  -H "Authorization: Bearer TOKEN_ANDA" \
+  -H "Content-Type: application/json" \
+  -d '{"response":"Menu bantuan terbaru"}'
+
+curl -X DELETE http://localhost:3000/api/commands/help \
+  -H "Authorization: Bearer TOKEN_ANDA"
+```
+
+### Balasan dinamis dari aplikasi lain
+
+Isi `webhookUrl` agar command diteruskan ke backend lain. `response` bersifat
+opsional dan dipakai sebagai fallback jika webhook gagal.
+
+```bash
+curl -X POST http://localhost:3000/api/commands \
+  -H "Authorization: Bearer TOKEN_ANDA" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "command":"/status",
+    "webhookUrl":"https://app-anda.example/webhooks/whatsapp-command",
+    "response":"Status sedang tidak dapat diperiksa. Coba lagi nanti."
+  }'
+```
+
+Ketika pengguna mengirim `/status INV-123`, API mengirim request berikut ke
+webhook:
+
+```json
+{
+  "event": "whatsapp.command",
+  "command": "/status",
+  "args": ["INV-123"],
+  "argsText": "INV-123",
+  "text": "/status INV-123",
+  "from": "6281234567890@c.us",
+  "chatId": "6281234567890@c.us",
+  "messageId": "...",
+  "timestamp": 1234567890
+}
+```
+
+Webhook harus merespons HTTP 2xx dengan JSON. Isi `reply` akan otomatis dikirim
+kembali ke chat WhatsApp. Nilai `null` atau respons kosong berarti command
+ditangani tanpa mengirim balasan.
+
+```json
+{
+  "reply": "Status invoice INV-123: lunas"
+}
+```
+
+Untuk mengamankan webhook, isi `COMMAND_WEBHOOK_SECRET`. Secret dikirim melalui
+header `Authorization: Bearer ...` dan `x-command-secret`. Batas waktu webhook
+dapat diatur melalui `COMMAND_WEBHOOK_TIMEOUT_MS`.
+
+Jika API ini dipakai langsung sebagai modul Node.js, handler JavaScript juga
+dapat didaftarkan untuk respons dinamis tanpa webhook:
+
+```js
+const { whatsapp } = require('./src/whatsapp/client');
+
+whatsapp.registerCommand('/hello', async ({ argsText, from }) => {
+  return `Halo ${argsText || from}!`;
+});
+```
+
 ## Endpoint
 
 | Method | Endpoint | Keterangan |
@@ -191,6 +295,11 @@ Ukuran body request dibatasi 25 MB. Untuk file besar, gunakan URL atau sesuaikan
 | POST | `/device/logout` | Logout dan menghapus login aktif |
 | POST | `/send` | Mengirim teks atau media |
 | POST | `/api/messages/send` | Alias endpoint kirim pesan |
+| GET | `/api/commands` | Melihat seluruh command |
+| GET | `/api/commands/:command` | Melihat satu command |
+| POST | `/api/commands` | Membuat atau memperbarui command |
+| PUT | `/api/commands/:command` | Memperbarui command |
+| DELETE | `/api/commands/:command` | Menghapus command |
 
 ## Deployment
 

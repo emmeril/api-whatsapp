@@ -5,3 +5,4 @@ node_modules/
 .wwebjs_cache/
 npm-debug.log*
 coverage/
+.data/

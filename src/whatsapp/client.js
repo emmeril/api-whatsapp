@@ -2,6 +2,7 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
 const { config } = require('../config');
+const { commandManager } = require('../commands');
 
 class WhatsAppService {
   constructor() {
@@ -84,6 +85,14 @@ class WhatsAppService {
       this.client = null;
       this.initializePromise = null;
       console.warn('WhatsApp terputus:', reason);
+    });
+
+    client.on('message', (message) => {
+      if (this.client !== client) return;
+
+      commandManager.handleMessage(message).catch((error) => {
+        console.error('Gagal memproses command WhatsApp:', error);
+      });
     });
 
     return client;
@@ -204,6 +213,10 @@ class WhatsAppService {
     }
 
     return result;
+  }
+
+  registerCommand(command, handler) {
+    return commandManager.registerHandler(command, handler);
   }
 
   async logout() {

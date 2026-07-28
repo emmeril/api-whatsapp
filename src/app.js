@@ -3,6 +3,7 @@ const express = require('express');
 const { apiAuth } = require('./middleware/auth');
 const { errorHandler, notFound } = require('./middleware/error-handler');
 const deviceRouter = require('./routes/device');
+const commandsRouter = require('./routes/commands');
 const { messagesRouter, sendMessage } = require('./routes/messages');
 
 const app = express();
@@ -18,6 +19,7 @@ app.get('/health', (req, res) => {
 app.use(apiAuth);
 app.use('/device', deviceRouter);
 app.use('/api/messages', messagesRouter);
+app.use('/api/commands', commandsRouter);
 
 // Alias bergaya Fonnte agar integrasi cukup memanggil POST /send.
 app.post('/send', sendMessage);
