@@ -40,6 +40,7 @@ class WhatsAppService {
 
     client.on('qr', (qr) => {
       if (this.client !== client) return;
+      console.log(`Status WhatsApp ${this.status} -> QR_REQUIRED`);
       this.status = 'QR_REQUIRED';
       QRCode.toDataURL(qr, { width: 360, margin: 2 })
         .then((dataUrl) => {
@@ -89,6 +90,8 @@ class WhatsAppService {
   }
 
   async startClient() {
+    console.log(`Memulai WhatsApp client dari status ${this.status}`);
+
     if (this.client) {
       const previousClient = this.client;
       this.client = null;
@@ -116,6 +119,14 @@ class WhatsAppService {
   initialize() {
     if (this.status === 'READY') return Promise.resolve();
     if (this.initializePromise) return this.initializePromise;
+
+    // Jangan mengganti browser yang masih aktif, terutama saat menunggu QR dipindai.
+    if (
+      this.client
+      && ['INITIALIZING', 'QR_REQUIRED', 'AUTHENTICATED'].includes(this.status)
+    ) {
+      return Promise.resolve();
+    }
 
     this.initializePromise = this.startClient()
       .finally(() => {
