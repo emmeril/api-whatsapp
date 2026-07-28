@@ -15,29 +15,69 @@ REST API pengiriman WhatsApp bergaya Fonnte yang dibuat dengan Node.js, Express,
 
 ## Instalasi
 
-Persyaratan: Node.js 18 atau lebih baru.
+Persyaratan: Node.js 18 atau lebih baru dan pnpm.
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env
 ```
 
-Ubah `API_TOKEN` di `.env`, lalu jalankan:
+Ubah `API_TOKEN` di `.env`, lalu sesuaikan konfigurasi lain bila diperlukan:
+
+```env
+PORT=3000
+API_TOKEN=ganti-dengan-token-rahasia-yang-panjang
+AUTO_CONNECT=true
+DEFAULT_COUNTRY_CODE=62
+```
+
+Jalankan API:
 
 ```bash
-npm start
+pnpm start
 ```
+
+Jalankan test:
+
+```bash
+pnpm test
+```
+
+Contoh request dalam dokumentasi ini menggunakan port default `3000`. Jika
+`PORT` di `.env` diubah, misalnya menjadi `3564`, gunakan port tersebut pada
+semua URL request.
 
 ### Menjalankan dengan PM2
 
-Pada server ini, simpan data PM2 di folder proyek agar writable:
+Pada server yang sudah memiliki unit `pm2-api-whatsapp.service`, kelola PM2
+melalui systemd:
 
 ```bash
-./scripts/pm2-start.sh
-PM2_HOME=/root/api-whatsapp/.pm2 pm2 status
+systemctl status pm2-api-whatsapp.service
+systemctl restart pm2-api-whatsapp.service
+journalctl -u pm2-api-whatsapp.service -f
 ```
 
-Jika Chromium bawaan tidak dapat berjalan pada server, pasang Chrome/Chromium dan isi `CHROME_EXECUTABLE_PATH` di `.env`.
+Aktifkan autostart setelah reboot bila belum aktif:
+
+```bash
+systemctl enable pm2-api-whatsapp.service
+```
+
+Jangan menjalankan `pm2`, `./scripts/pm2-start.sh`, atau daemon PM2 lain secara
+manual pada server yang sudah dikelola systemd. Lebih dari satu daemon dapat
+menjalankan aplikasi dan Chromium ganda, menggunakan port yang sama, atau
+mengunci folder sesi WhatsApp yang sama.
+
+Pada server ARM/Debian, Chromium bawaan Puppeteer mungkin tidak cocok dengan
+arsitektur server. Pasang Chromium sistem dan isi executable-nya di `.env`:
+
+```env
+CHROME_EXECUTABLE_PATH=/usr/bin/chromium
+```
+
+Lokasi lain, seperti `/usr/bin/google-chrome`, juga dapat digunakan sesuai
+instalasi server.
 
 ### Menjalankan dengan Docker
 
@@ -92,6 +132,25 @@ curl -X POST http://localhost:3000/send \
 
 Endpoint alternatifnya adalah `POST /api/messages/send`.
 
+Contoh respons berhasil:
+
+```json
+{
+  "status": true,
+  "message": "Pesan berhasil dikirim",
+  "data": {
+    "id": null,
+    "target": "6281234567890",
+    "timestamp": null,
+    "type": "chat"
+  }
+}
+```
+
+`id` dan `timestamp` dapat bernilai `null` ketika WhatsApp Web berhasil
+mengirim pesan tetapi tidak mengembalikan metadata pesan. Kondisi tersebut
+tetap dianggap berhasil.
+
 ### Media dari URL
 
 ```bash
@@ -135,6 +194,6 @@ Ukuran body request dibatasi 25 MB. Untuk file besar, gunakan URL atau sesuaikan
 
 ## Deployment
 
-Folder `.wwebjs_auth` menyimpan sesi login. Jadikan folder ini volume persisten saat memakai Docker atau platform cloud. Jalankan satu instance aplikasi untuk satu `CLIENT_ID`; beberapa proses yang memakai folder sesi yang sama dapat merusak sesi atau gagal membuka Chromium.
+Folder `.wwebjs_auth` menyimpan sesi login. Jadikan folder ini volume persisten saat memakai Docker atau platform cloud. Jalankan satu instance aplikasi untuk satu `CLIENT_ID`; beberapa proses yang memakai folder sesi yang sama dapat merusak sesi, gagal membuka Chromium dengan pesan `The browser is already running`, atau berebut port aplikasi.
 
 Untuk produksi, tempatkan API di balik HTTPS/reverse proxy, batasi akses jaringan, gunakan token acak yang panjang, dan jangan mengekspos endpoint QR ke publik tanpa autentikasi.
