@@ -106,10 +106,10 @@ async function sendMessage(req, res, next) {
       status: true,
       message: 'Pesan berhasil dikirim',
       data: {
-        id: result.id?._serialized,
+        id: result?.id?._serialized || null,
         target: normalizedTarget,
-        timestamp: result.timestamp,
-        type: result.type,
+        timestamp: result?.timestamp || null,
+        type: result?.type || (media ? 'media' : 'chat'),
       },
     });
   } catch (error) {
