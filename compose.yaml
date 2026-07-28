@@ -1,0 +1,16 @@
+services:
+  whatsapp-api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:${PORT:-3000}"
+    env_file:
+      - .env
+    environment:
+      SESSION_PATH: /app/.wwebjs_auth
+      CHROME_EXECUTABLE_PATH: /usr/bin/chromium
+    volumes:
+      - whatsapp-session:/app/.wwebjs_auth
+
+volumes:
+  whatsapp-session:
