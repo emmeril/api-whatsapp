@@ -126,11 +126,21 @@ class CommandManager {
     if (this.filePath && fs.existsSync(this.filePath)) {
       try {
         const stored = JSON.parse(fs.readFileSync(this.filePath, 'utf8'));
-        definitions = Array.isArray(stored) ? stored : stored.commands;
+        definitions = Array.isArray(stored) ? stored : stored?.commands;
         if (!Array.isArray(definitions)) throw new Error('format commands harus berupa array');
       } catch (error) {
         console.error(`Gagal membaca command dari ${this.filePath}:`, error.message);
-        definitions = [];
+
+        // Simpan file rusak agar tidak tertimpa oleh penulisan berikutnya.
+        const backupPath = `${this.filePath}.corrupt`;
+        try {
+          fs.renameSync(this.filePath, backupPath);
+          console.error(`File command rusak dipindahkan ke ${backupPath}`);
+        } catch (backupError) {
+          console.error('Gagal menyimpan salinan file command rusak:', backupError.message);
+        }
+
+        definitions = defaults;
       }
     }
 
@@ -166,17 +176,34 @@ class CommandManager {
     const entry = normalizeDefinition({ ...input, command: normalizedCommand }, existing);
 
     this.commands.set(normalizedCommand, entry);
-    await this.persist();
+
+    try {
+      await this.persist();
+    } catch (error) {
+      // Kembalikan state memori agar tidak berbeda dengan isi file yang gagal ditulis.
+      if (existing) this.commands.set(normalizedCommand, existing);
+      else this.commands.delete(normalizedCommand);
+      throw error;
+    }
+
     return this.get(normalizedCommand);
   }
 
   async remove(command) {
     const normalized = normalizeCommand(command);
-    if (!this.commands.has(normalized)) return false;
+    const existing = this.commands.get(normalized);
+    if (!existing) return false;
 
     this.commands.delete(normalized);
+
+    try {
+      await this.persist();
+    } catch (error) {
+      this.commands.set(normalized, existing);
+      throw error;
+    }
+
     this.handlers.delete(normalized);
-    await this.persist();
     return true;
   }
 
@@ -211,7 +238,11 @@ class CommandManager {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.webhookTimeoutMs);
+    let timedOut = false;
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, this.webhookTimeoutMs);
     const headers = { 'content-type': 'application/json' };
 
     if (this.webhookSecret) {
@@ -247,12 +278,26 @@ class CommandManager {
       const contentType = response.headers?.get?.('content-type') || '';
       if (!contentType.includes('application/json')) return body.trim();
 
-      const payload = JSON.parse(body);
+      let payload;
+      try {
+        payload = JSON.parse(body);
+      } catch {
+        throw new Error('Webhook command mengirim JSON yang tidak valid');
+      }
+
+      if (typeof payload === 'string') return payload.trim() || null;
+      if (payload === null || typeof payload !== 'object') return null;
+
       const reply = payload.reply ?? payload.message ?? null;
       if (reply !== null && typeof reply !== 'string') {
         throw new Error('Field reply dari webhook harus berupa string atau null');
       }
       return reply?.trim() || null;
+    } catch (error) {
+      if (timedOut) {
+        throw new Error(`Webhook command tidak merespons dalam ${this.webhookTimeoutMs} ms`);
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
@@ -268,7 +313,10 @@ class CommandManager {
 
     const entry = this.commands.get(parsed.command);
     const handler = this.handlers.get(parsed.command);
-    if ((entry && !entry.enabled) || (!entry && !handler)) {
+
+    // Entry yang dinonaktifkan hanya memblokir balasan tersimpan, bukan handler
+    // yang didaftarkan langsung dari kode.
+    if (!handler && (!entry || !entry.enabled)) {
       return { handled: false, replied: false };
     }
 

@@ -9,8 +9,11 @@ services:
     environment:
       SESSION_PATH: /app/.wwebjs_auth
       CHROME_EXECUTABLE_PATH: /usr/bin/chromium
+      COMMANDS_FILE: /app/.data/commands.json
     volumes:
       - whatsapp-session:/app/.wwebjs_auth
+      - whatsapp-data:/app/.data
 
 volumes:
   whatsapp-session:
+  whatsapp-data:

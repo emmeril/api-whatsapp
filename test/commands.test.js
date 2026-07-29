@@ -101,6 +101,94 @@ test('menyimpan command ke file dan memuatnya setelah restart', async (t) => {
   });
 });
 
+test('tidak mengubah state di memori ketika penyimpanan gagal', async () => {
+  // Komponen path berupa file membuat mkdir gagal, mensimulasikan disk error.
+  const manager = new CommandManager({
+    filePath: path.join(__filename, 'commands.json'),
+    defaults: [{ command: 'keep', response: 'tetap ada' }],
+  });
+
+  await assert.rejects(() => manager.set({ command: 'baru', response: 'x' }));
+  assert.deepEqual(manager.list().map((entry) => entry.command), ['/keep']);
+
+  await assert.rejects(() => manager.remove('keep'));
+  assert.deepEqual(manager.list().map((entry) => entry.command), ['/keep']);
+});
+
+test('menyelamatkan file command yang rusak dan memakai default', async (t) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'api-whatsapp-corrupt-'));
+  const filePath = path.join(directory, 'commands.json');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  fs.writeFileSync(filePath, '{ bukan json valid');
+
+  const manager = new CommandManager({
+    filePath,
+    defaults: [{ command: 'start', response: 'Halo!' }],
+  });
+
+  assert.deepEqual(manager.list().map((entry) => entry.command), ['/start']);
+  assert.equal(fs.readFileSync(`${filePath}.corrupt`, 'utf8'), '{ bukan json valid');
+});
+
+test('command nonaktif tetap memblokir response tersimpan tapi bukan handler kode', async () => {
+  const disabled = new CommandManager({
+    defaults: [{ command: 'x', response: 'tersimpan', enabled: false }],
+  });
+  assert.deepEqual(
+    await disabled.handleMessage({ body: '/x', from: 'a@c.us', reply: async () => {} }),
+    { handled: false, replied: false },
+  );
+
+  const withHandler = new CommandManager({
+    defaults: [{ command: 'x', response: 'tersimpan', enabled: false }],
+  });
+  let reply;
+  withHandler.registerHandler('x', () => 'dari handler');
+  assert.deepEqual(
+    await withHandler.handleMessage({
+      body: '/x',
+      from: 'a@c.us',
+      reply: async (text) => { reply = text; },
+    }),
+    { handled: true, replied: true },
+  );
+  assert.equal(reply, 'dari handler');
+});
+
+test('menangani payload webhook yang tidak wajar tanpa crash', async () => {
+  const build = (body) => new CommandManager({
+    defaults: [{ command: 'w', webhookUrl: 'https://app.example.test/h' }],
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      text: async () => body,
+    }),
+  });
+
+  for (const body of ['null', '{"ok":true}', '""']) {
+    assert.deepEqual(
+      await build(body).handleMessage({ body: '/w', from: 'a@c.us', reply: async () => {} }),
+      { handled: true, replied: false },
+    );
+  }
+});
+
+test('melaporkan timeout webhook dengan pesan yang jelas', async () => {
+  const manager = new CommandManager({
+    webhookTimeoutMs: 100,
+    defaults: [{ command: 'w', webhookUrl: 'https://app.example.test/h' }],
+    fetchImpl: (url, options) => new Promise((resolve, reject) => {
+      options.signal.addEventListener('abort', () => reject(new Error('aborted')));
+    }),
+  });
+
+  await assert.rejects(
+    () => manager.handleMessage({ body: '/w', from: 'a@c.us', reply: async () => {} }),
+    /tidak merespons dalam 100 ms/,
+  );
+});
+
 test('handler JavaScript dapat menghasilkan balasan dinamis', async () => {
   const manager = new CommandManager({});
   let reply;

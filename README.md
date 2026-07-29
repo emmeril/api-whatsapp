@@ -90,7 +90,7 @@ docker compose up --build -d
 docker compose logs -f whatsapp-api
 ```
 
-Sesi WhatsApp disimpan pada volume `whatsapp-session`, sehingga login tetap tersedia setelah container dibuat ulang.
+Sesi WhatsApp disimpan pada volume `whatsapp-session`, sehingga login tetap tersedia setelah container dibuat ulang. Konfigurasi command disimpan pada volume `whatsapp-data` agar juga tidak hilang.
 
 ## Menghubungkan perangkat
 

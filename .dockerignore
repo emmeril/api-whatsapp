@@ -3,5 +3,6 @@ node_modules
 .git
 .wwebjs_auth
 .wwebjs_cache
+.data
 coverage
 npm-debug.log*

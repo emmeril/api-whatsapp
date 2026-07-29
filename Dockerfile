@@ -19,13 +19,13 @@ RUN npm install --omit=dev
 
 COPY . .
 
-RUN mkdir -p /app/.wwebjs_auth \
+RUN mkdir -p /app/.wwebjs_auth /app/.data \
     && chown -R node:node /app
 
 USER node
 
 EXPOSE 3000
 
-VOLUME ["/app/.wwebjs_auth"]
+VOLUME ["/app/.wwebjs_auth", "/app/.data"]
 
 CMD ["node", "src/server.js"]
