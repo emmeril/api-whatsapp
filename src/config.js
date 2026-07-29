@@ -13,6 +13,10 @@ const config = {
   sessionPath: path.resolve(process.env.SESSION_PATH || '.wwebjs_auth'),
   clientId: process.env.CLIENT_ID || 'main',
   autoConnect: parseBoolean(process.env.AUTO_CONNECT, true),
+  reconnectBaseDelayMs: Number(process.env.RECONNECT_BASE_DELAY_MS || 5000),
+  reconnectMaxDelayMs: Number(process.env.RECONNECT_MAX_DELAY_MS || 60000),
+  watchdogIntervalMs: Number(process.env.WATCHDOG_INTERVAL_MS || 30000),
+  whatsappOperationTimeoutMs: Number(process.env.WHATSAPP_OPERATION_TIMEOUT_MS || 30000),
   countryCode: (process.env.DEFAULT_COUNTRY_CODE || '62').replace(/\D/g, ''),
   chromeExecutablePath: process.env.CHROME_EXECUTABLE_PATH || undefined,
   commandsFile: path.resolve(process.env.COMMANDS_FILE || '.data/commands.json'),
@@ -34,6 +38,21 @@ function validateConfig() {
 
   if (!config.countryCode) {
     throw new Error('DEFAULT_COUNTRY_CODE tidak valid');
+  }
+
+  for (const [name, value] of [
+    ['RECONNECT_BASE_DELAY_MS', config.reconnectBaseDelayMs],
+    ['RECONNECT_MAX_DELAY_MS', config.reconnectMaxDelayMs],
+    ['WATCHDOG_INTERVAL_MS', config.watchdogIntervalMs],
+    ['WHATSAPP_OPERATION_TIMEOUT_MS', config.whatsappOperationTimeoutMs],
+  ]) {
+    if (!Number.isInteger(value) || value < 100) {
+      throw new Error(`${name} harus berupa angka minimal 100`);
+    }
+  }
+
+  if (config.reconnectMaxDelayMs < config.reconnectBaseDelayMs) {
+    throw new Error('RECONNECT_MAX_DELAY_MS tidak boleh lebih kecil dari RECONNECT_BASE_DELAY_MS');
   }
 
   if (

@@ -18,6 +18,106 @@ class WhatsAppService {
     this.qrDataUrl = null;
     this.lastError = null;
     this.initializePromise = null;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.watchdogTimer = null;
+    this.watchdogRunning = false;
+    this.recoveryPromise = null;
+    this.desiredRunning = false;
+  }
+
+  isRecoverableError(error) {
+    const message = String(error?.message || error);
+    return /detached Frame|Target closed|Session closed|Protocol error|Execution context was destroyed|browser.*disconnect/i.test(message);
+  }
+
+  withTimeout(promise, operation) {
+    let timer;
+    const timeout = new Promise((resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new Error(`Timeout saat ${operation}`);
+        error.code = 'WHATSAPP_OPERATION_TIMEOUT';
+        reject(error);
+      }, config.whatsappOperationTimeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+  }
+
+  scheduleReconnect(reason, immediate = false) {
+    if (!this.desiredRunning || this.reconnectTimer || this.initializePromise) return;
+
+    const exponent = Math.min(this.reconnectAttempts, 4);
+    const delay = immediate
+      ? 0
+      : Math.min(config.reconnectMaxDelayMs, config.reconnectBaseDelayMs * (2 ** exponent));
+    this.reconnectAttempts += 1;
+    console.warn(`Menjadwalkan reconnect WhatsApp dalam ${delay} ms (${reason})`);
+
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.initialize().catch((error) => {
+        console.error('Reconnect WhatsApp gagal:', error.message);
+        this.scheduleReconnect(error.message);
+      });
+    }, delay);
+    this.reconnectTimer.unref?.();
+  }
+
+  startWatchdog() {
+    if (this.watchdogTimer) return;
+
+    this.watchdogTimer = setInterval(async () => {
+      if (!this.client || this.status !== 'READY' || this.watchdogRunning) return;
+      this.watchdogRunning = true;
+      try {
+        const state = await this.withTimeout(
+          this.client.getState(),
+          'memeriksa status WhatsApp',
+        );
+        if (state !== 'CONNECTED') {
+          throw new Error(`WhatsApp state ${state || 'UNKNOWN'}`);
+        }
+      } catch (error) {
+        this.lastError = error.message;
+        console.error('Watchdog WhatsApp mendeteksi koneksi rusak:', error.message);
+        this.recoverClient(error);
+      } finally {
+        this.watchdogRunning = false;
+      }
+    }, config.watchdogIntervalMs);
+    this.watchdogTimer.unref?.();
+  }
+
+  stopWatchdog() {
+    if (this.watchdogTimer) clearInterval(this.watchdogTimer);
+    this.watchdogTimer = null;
+  }
+
+  recoverClient(error) {
+    const brokenClient = this.client;
+    this.client = null;
+    this.initializePromise = null;
+    this.status = 'DISCONNECTED';
+    this.qrDataUrl = null;
+    this.lastError = error?.message || String(error);
+
+    if (this.recoveryPromise) return;
+    if (!brokenClient) {
+      this.scheduleReconnect(this.lastError, true);
+      return;
+    }
+
+    const closeTimeout = new Promise((resolve) => {
+      const timer = setTimeout(resolve, 5000);
+      timer.unref?.();
+    });
+    this.recoveryPromise = Promise.race([
+      Promise.resolve().then(() => brokenClient.destroy()).catch(() => {}),
+      closeTimeout,
+    ]).finally(() => {
+      this.recoveryPromise = null;
+      this.scheduleReconnect(this.lastError, true);
+    });
   }
 
   createClient() {
@@ -74,6 +174,8 @@ class WhatsAppService {
       this.status = 'READY';
       this.qrDataUrl = null;
       this.lastError = null;
+      this.reconnectAttempts = 0;
+      this.startWatchdog();
       console.log('WhatsApp siap mengirim pesan');
     });
 
@@ -92,6 +194,14 @@ class WhatsAppService {
       this.client = null;
       this.initializePromise = null;
       console.warn('WhatsApp terputus:', reason);
+      this.scheduleReconnect(String(reason));
+    });
+
+    client.on('change_state', (state) => {
+      if (this.client !== client) return;
+      if (['TIMEOUT', 'CONFLICT', 'UNPAIRED'].includes(state)) {
+        this.recoverClient(new Error(`WhatsApp state ${state}`));
+      }
     });
 
     client.on('message', (message) => {
@@ -128,6 +238,11 @@ class WhatsAppService {
 
     try {
       await client.initialize();
+      client.pupBrowser?.once('disconnected', () => {
+        if (this.client !== client) return;
+        console.error('Proses Chromium WhatsApp terputus');
+        this.recoverClient(new Error('Browser WhatsApp disconnected'));
+      });
     } catch (error) {
       if (this.client === client) {
         this.status = 'ERROR';
@@ -140,6 +255,7 @@ class WhatsAppService {
   }
 
   initialize() {
+    this.desiredRunning = true;
     if (this.status === 'READY') return Promise.resolve();
     if (this.initializePromise) return this.initializePromise;
 
@@ -154,6 +270,9 @@ class WhatsAppService {
     this.initializePromise = this.startClient()
       .finally(() => {
         this.initializePromise = null;
+        if (this.desiredRunning && this.status === 'ERROR') {
+          this.scheduleReconnect(this.lastError || 'inisialisasi gagal');
+        }
       });
 
     return this.initializePromise;
@@ -164,9 +283,16 @@ class WhatsAppService {
 
     if (this.client && this.status === 'READY') {
       try {
-        whatsappState = await this.client.getState();
+        whatsappState = await this.withTimeout(
+          this.client.getState(),
+          'membaca status WhatsApp',
+        );
+        if (whatsappState !== 'CONNECTED') {
+          throw new Error(`WhatsApp state ${whatsappState || 'UNKNOWN'}`);
+        }
       } catch (error) {
         this.lastError = error.message;
+        this.recoverClient(error);
       }
     }
 
@@ -201,32 +327,52 @@ class WhatsAppService {
 
   async send({ chatId, message, media }) {
     this.requireReady();
+    const client = this.client;
 
-    const registered = await this.client.isRegisteredUser(chatId);
-    if (!registered) {
-      const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp');
-      error.statusCode = 422;
-      error.code = 'NUMBER_NOT_REGISTERED';
+    try {
+      const registered = await this.withTimeout(
+        client.isRegisteredUser(chatId),
+        'memeriksa nomor WhatsApp',
+      );
+      if (!registered) {
+        const error = new Error('Nomor tujuan tidak terdaftar di WhatsApp');
+        error.statusCode = 422;
+        error.code = 'NUMBER_NOT_REGISTERED';
+        throw error;
+      }
+
+      let result;
+      if (media) {
+        const messageMedia = media.url
+          ? await MessageMedia.fromUrl(media.url, { unsafeMime: true })
+          : new MessageMedia(media.mimetype, media.data, media.filename);
+
+        if (media.filename) messageMedia.filename = media.filename;
+
+        result = await this.withTimeout(client.sendMessage(chatId, messageMedia, {
+          caption: message || undefined,
+          sendMediaAsDocument: Boolean(media.asDocument),
+        }), 'mengirim media WhatsApp');
+      } else {
+        result = await this.withTimeout(
+          client.sendMessage(chatId, message),
+          'mengirim pesan WhatsApp',
+        );
+      }
+
+      return result;
+    } catch (error) {
+      if (this.isRecoverableError(error) || error.code === 'WHATSAPP_OPERATION_TIMEOUT') {
+        this.recoverClient(error);
+        const unavailable = new Error(
+          'Koneksi WhatsApp sedang dipulihkan. Coba lagi beberapa saat lagi.',
+        );
+        unavailable.statusCode = 503;
+        unavailable.code = 'WHATSAPP_RECOVERING';
+        throw unavailable;
+      }
       throw error;
     }
-
-    let result;
-    if (media) {
-      const messageMedia = media.url
-        ? await MessageMedia.fromUrl(media.url, { unsafeMime: true })
-        : new MessageMedia(media.mimetype, media.data, media.filename);
-
-      if (media.filename) messageMedia.filename = media.filename;
-
-      result = await this.client.sendMessage(chatId, messageMedia, {
-        caption: message || undefined,
-        sendMediaAsDocument: Boolean(media.asDocument),
-      });
-    } else {
-      result = await this.client.sendMessage(chatId, message);
-    }
-
-    return result;
   }
 
   registerCommand(command, handler) {
@@ -234,6 +380,11 @@ class WhatsAppService {
   }
 
   async logout() {
+    this.desiredRunning = false;
+    this.stopWatchdog();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+
     if (!this.client) {
       this.status = 'DISCONNECTED';
       return;
@@ -248,6 +399,10 @@ class WhatsAppService {
   }
 
   async destroy() {
+    this.desiredRunning = false;
+    this.stopWatchdog();
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
     if (this.client) await this.client.destroy();
     this.client = null;
     this.status = 'DISCONNECTED';

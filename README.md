@@ -31,6 +31,10 @@ PORT=3000
 API_TOKEN=ganti-dengan-token-rahasia-yang-panjang
 AUTO_CONNECT=true
 DEFAULT_COUNTRY_CODE=62
+RECONNECT_BASE_DELAY_MS=5000
+RECONNECT_MAX_DELAY_MS=60000
+WATCHDOG_INTERVAL_MS=30000
+WHATSAPP_OPERATION_TIMEOUT_MS=30000
 ```
 
 Jalankan API:
@@ -65,6 +69,11 @@ Aktifkan autostart setelah reboot bila belum aktif:
 ```bash
 systemctl enable pm2-api-whatsapp.service
 ```
+
+Aplikasi memiliki watchdog koneksi. Jika Chromium crash, frame WhatsApp Web
+rusak, atau operasi menggantung melewati timeout, client lama akan ditutup dan
+dibuat ulang secara otomatis. PM2 menjaga proses Node tetap hidup, sedangkan
+systemd menjaga daemon PM2 hidup setelah crash atau reboot server.
 
 Jangan menjalankan `pm2`, `./scripts/pm2-start.sh`, atau daemon PM2 lain secara
 manual pada server yang sudah dikelola systemd. Lebih dari satu daemon dapat
