@@ -1,6 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { postWebhook } = require('../utils/webhook');
+
 const COMMAND_PATTERN = /^[a-z0-9_]{1,32}$/i;
 
 function commandError(message, statusCode = 400, code = 'INVALID_COMMAND') {
@@ -232,75 +234,26 @@ class CommandManager {
     return operation;
   }
 
-  async callWebhook(entry, context) {
-    if (typeof this.fetchImpl !== 'function') {
-      throw new Error('Runtime Node.js tidak menyediakan fetch untuk command webhook');
-    }
-
-    const controller = new AbortController();
-    let timedOut = false;
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, this.webhookTimeoutMs);
-    const headers = { 'content-type': 'application/json' };
-
-    if (this.webhookSecret) {
-      headers.authorization = `Bearer ${this.webhookSecret}`;
-      headers['x-command-secret'] = this.webhookSecret;
-    }
-
-    try {
-      const response = await this.fetchImpl(entry.webhookUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          event: 'whatsapp.command',
-          command: `/${context.command}`,
-          args: context.args,
-          argsText: context.argsText,
-          text: context.raw,
-          from: context.from,
-          chatId: context.chatId,
-          messageId: context.messageId,
-          timestamp: context.timestamp,
-        }),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`Webhook command merespons HTTP ${response.status}`);
-      }
-
-      const body = await response.text();
-      if (!body.trim()) return null;
-
-      const contentType = response.headers?.get?.('content-type') || '';
-      if (!contentType.includes('application/json')) return body.trim();
-
-      let payload;
-      try {
-        payload = JSON.parse(body);
-      } catch {
-        throw new Error('Webhook command mengirim JSON yang tidak valid');
-      }
-
-      if (typeof payload === 'string') return payload.trim() || null;
-      if (payload === null || typeof payload !== 'object') return null;
-
-      const reply = payload.reply ?? payload.message ?? null;
-      if (reply !== null && typeof reply !== 'string') {
-        throw new Error('Field reply dari webhook harus berupa string atau null');
-      }
-      return reply?.trim() || null;
-    } catch (error) {
-      if (timedOut) {
-        throw new Error(`Webhook command tidak merespons dalam ${this.webhookTimeoutMs} ms`);
-      }
-      throw error;
-    } finally {
-      clearTimeout(timeout);
-    }
+  callWebhook(entry, context) {
+    return postWebhook({
+      url: entry.webhookUrl,
+      payload: {
+        event: 'whatsapp.command',
+        command: `/${context.command}`,
+        args: context.args,
+        argsText: context.argsText,
+        text: context.raw,
+        from: context.from,
+        chatId: context.chatId,
+        messageId: context.messageId,
+        timestamp: context.timestamp,
+      },
+      secret: this.webhookSecret,
+      secretHeader: 'x-command-secret',
+      timeoutMs: this.webhookTimeoutMs,
+      fetchImpl: this.fetchImpl,
+      label: 'command',
+    });
   }
 
   async handleMessage(message) {

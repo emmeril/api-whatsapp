@@ -283,6 +283,46 @@ whatsapp.registerCommand('/hello', async ({ argsText, from }) => {
 });
 ```
 
+## Meneruskan semua pesan masuk
+
+Command hanya cocok untuk pesan berpola `/nama`. Aplikasi yang memakai pola lain,
+misalnya bot cashflow dengan `+10000 Gaji #bank` atau trigger grup `!eril`,
+dapat menerima seluruh pesan masuk melalui `MESSAGE_WEBHOOK_URL`:
+
+```env
+MESSAGE_WEBHOOK_URL=http://127.0.0.1:3300/webhooks/whatsapp
+MESSAGE_WEBHOOK_SECRET=ganti-dengan-secret-webhook
+MESSAGE_WEBHOOK_TIMEOUT_MS=10000
+```
+
+Command terdaftar tetap diproses lebih dulu. Pesan diteruskan hanya jika tidak
+ada command yang menanganinya, sehingga `/start` tidak sampai ke webhook ini.
+Pesan dari diri sendiri, `status@broadcast`, dan pesan tanpa teks diabaikan.
+
+Payload yang dikirim:
+
+```json
+{
+  "event": "whatsapp.message",
+  "text": "+10000 Gaji #bank",
+  "from": "6281234567890@c.us",
+  "chatId": "120363000000000000@g.us",
+  "isGroup": true,
+  "type": "chat",
+  "messageId": "...",
+  "timestamp": 1234567890
+}
+```
+
+Pada chat pribadi, `from` dan `chatId` bernilai sama. Pada grup, `chatId` adalah
+ID grup dan `from` adalah pengirim aslinya.
+
+Aturan responsnya sama dengan webhook command: HTTP 2xx dengan `reply` berisi
+teks balasan, atau `null` bila pesan tidak perlu dijawab. Secret dikirim melalui
+header `Authorization: Bearer ...` dan `x-message-secret`.
+
+Kosongkan `MESSAGE_WEBHOOK_URL` untuk mematikan penerusan pesan.
+
 ## Endpoint
 
 | Method | Endpoint | Keterangan |

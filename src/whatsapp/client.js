@@ -3,6 +3,13 @@ const QRCode = require('qrcode');
 
 const { config } = require('../config');
 const { commandManager } = require('../commands');
+const { MessageWebhook } = require('./message-webhook');
+
+const messageWebhook = new MessageWebhook({
+  url: config.messageWebhookUrl,
+  secret: config.messageWebhookSecret,
+  timeoutMs: config.messageWebhookTimeoutMs,
+});
 
 class WhatsAppService {
   constructor() {
@@ -90,9 +97,16 @@ class WhatsAppService {
     client.on('message', (message) => {
       if (this.client !== client) return;
 
-      commandManager.handleMessage(message).catch((error) => {
-        console.error('Gagal memproses command WhatsApp:', error);
-      });
+      // Command terdaftar diproses lebih dulu; sisanya diteruskan ke webhook
+      // pesan agar aplikasi lain dapat menangani pola non-slash.
+      commandManager.handleMessage(message)
+        .then((result) => {
+          if (result.handled) return null;
+          return messageWebhook.forward(message);
+        })
+        .catch((error) => {
+          console.error('Gagal memproses pesan WhatsApp:', error.message);
+        });
     });
 
     return client;

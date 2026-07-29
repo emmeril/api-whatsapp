@@ -18,6 +18,9 @@ const config = {
   commandsFile: path.resolve(process.env.COMMANDS_FILE || '.data/commands.json'),
   commandWebhookSecret: process.env.COMMAND_WEBHOOK_SECRET || '',
   commandWebhookTimeoutMs: Number(process.env.COMMAND_WEBHOOK_TIMEOUT_MS || 10000),
+  messageWebhookUrl: process.env.MESSAGE_WEBHOOK_URL || '',
+  messageWebhookSecret: process.env.MESSAGE_WEBHOOK_SECRET || '',
+  messageWebhookTimeoutMs: Number(process.env.MESSAGE_WEBHOOK_TIMEOUT_MS || 10000),
 };
 
 function validateConfig() {
@@ -39,6 +42,27 @@ function validateConfig() {
     || config.commandWebhookTimeoutMs > 60000
   ) {
     throw new Error('COMMAND_WEBHOOK_TIMEOUT_MS harus antara 100 dan 60000');
+  }
+
+  if (
+    !Number.isInteger(config.messageWebhookTimeoutMs)
+    || config.messageWebhookTimeoutMs < 100
+    || config.messageWebhookTimeoutMs > 60000
+  ) {
+    throw new Error('MESSAGE_WEBHOOK_TIMEOUT_MS harus antara 100 dan 60000');
+  }
+
+  if (config.messageWebhookUrl) {
+    let url;
+    try {
+      url = new URL(config.messageWebhookUrl);
+    } catch {
+      throw new Error('MESSAGE_WEBHOOK_URL tidak valid');
+    }
+
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('MESSAGE_WEBHOOK_URL hanya mendukung protokol HTTP atau HTTPS');
+    }
   }
 }
 
