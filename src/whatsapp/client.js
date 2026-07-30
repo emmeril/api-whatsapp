@@ -43,8 +43,26 @@ class WhatsAppService {
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
   }
 
+  closeClient(client) {
+    if (!client) return Promise.resolve();
+
+    const closeTimeout = new Promise((resolve) => {
+      const timer = setTimeout(resolve, 5000);
+      timer.unref?.();
+    });
+    return Promise.race([
+      Promise.resolve().then(() => client.destroy()).catch(() => {}),
+      closeTimeout,
+    ]);
+  }
+
   scheduleReconnect(reason, immediate = false) {
-    if (!this.desiredRunning || this.reconnectTimer || this.initializePromise) return;
+    if (
+      !this.desiredRunning
+      || this.reconnectTimer
+      || this.initializePromise
+      || this.recoveryPromise
+    ) return;
 
     const exponent = Math.min(this.reconnectAttempts, 4);
     const delay = immediate
@@ -68,19 +86,19 @@ class WhatsAppService {
 
     this.watchdogTimer = setInterval(async () => {
       if (!this.client || this.status !== 'READY' || this.watchdogRunning) return;
+      const client = this.client;
       this.watchdogRunning = true;
       try {
         const state = await this.withTimeout(
-          this.client.getState(),
+          client.getState(),
           'memeriksa status WhatsApp',
         );
         if (state !== 'CONNECTED') {
           throw new Error(`WhatsApp state ${state || 'UNKNOWN'}`);
         }
       } catch (error) {
-        this.lastError = error.message;
         console.error('Watchdog WhatsApp mendeteksi koneksi rusak:', error.message);
-        this.recoverClient(error);
+        this.recoverClient(error, true, client);
       } finally {
         this.watchdogRunning = false;
       }
@@ -93,30 +111,24 @@ class WhatsAppService {
     this.watchdogTimer = null;
   }
 
-  recoverClient(error) {
+  recoverClient(error, immediate = true, expectedClient = null) {
+    if (expectedClient && this.client !== expectedClient) return;
+
     const brokenClient = this.client;
     this.client = null;
-    this.initializePromise = null;
     this.status = 'DISCONNECTED';
     this.qrDataUrl = null;
     this.lastError = error?.message || String(error);
 
     if (this.recoveryPromise) return;
     if (!brokenClient) {
-      this.scheduleReconnect(this.lastError, true);
+      this.scheduleReconnect(this.lastError, immediate);
       return;
     }
 
-    const closeTimeout = new Promise((resolve) => {
-      const timer = setTimeout(resolve, 5000);
-      timer.unref?.();
-    });
-    this.recoveryPromise = Promise.race([
-      Promise.resolve().then(() => brokenClient.destroy()).catch(() => {}),
-      closeTimeout,
-    ]).finally(() => {
+    this.recoveryPromise = this.closeClient(brokenClient).finally(() => {
       this.recoveryPromise = null;
-      this.scheduleReconnect(this.lastError, true);
+      this.scheduleReconnect(this.lastError, immediate);
     });
   }
 
@@ -184,17 +196,15 @@ class WhatsAppService {
       this.status = 'AUTH_FAILURE';
       this.lastError = message;
       console.error('Autentikasi WhatsApp gagal:', message);
+      // Auth failure dapat terjadi tanpa diikuti event disconnected. Bersihkan
+      // client lalu biarkan mekanisme reconnect mencoba sesi/QR berikutnya.
+      this.recoverClient(new Error(`Autentikasi WhatsApp gagal: ${message}`), false);
     });
 
     client.on('disconnected', (reason) => {
       if (this.client !== client) return;
-      this.status = 'DISCONNECTED';
-      this.qrDataUrl = null;
-      this.lastError = String(reason);
-      this.client = null;
-      this.initializePromise = null;
       console.warn('WhatsApp terputus:', reason);
-      this.scheduleReconnect(String(reason));
+      this.recoverClient(new Error(`WhatsApp terputus: ${reason}`), false);
     });
 
     client.on('change_state', (state) => {
@@ -228,7 +238,7 @@ class WhatsAppService {
     if (this.client) {
       const previousClient = this.client;
       this.client = null;
-      await previousClient.destroy().catch(() => {});
+      await this.closeClient(previousClient);
     }
 
     this.status = 'INITIALIZING';
@@ -237,7 +247,7 @@ class WhatsAppService {
     this.client = client;
 
     try {
-      await client.initialize();
+      await this.withTimeout(client.initialize(), 'memulai WhatsApp');
       client.pupBrowser?.once('disconnected', () => {
         if (this.client !== client) return;
         console.error('Proses Chromium WhatsApp terputus');
@@ -249,7 +259,7 @@ class WhatsAppService {
         this.lastError = error.message;
         this.client = null;
       }
-      await client.destroy().catch(() => {});
+      await this.closeClient(client);
       throw error;
     }
   }
@@ -270,7 +280,11 @@ class WhatsAppService {
     this.initializePromise = this.startClient()
       .finally(() => {
         this.initializePromise = null;
-        if (this.desiredRunning && this.status === 'ERROR') {
+        if (
+          this.desiredRunning
+          && !this.client
+          && ['ERROR', 'DISCONNECTED'].includes(this.status)
+        ) {
           this.scheduleReconnect(this.lastError || 'inisialisasi gagal');
         }
       });
@@ -282,17 +296,17 @@ class WhatsAppService {
     let whatsappState = null;
 
     if (this.client && this.status === 'READY') {
+      const client = this.client;
       try {
         whatsappState = await this.withTimeout(
-          this.client.getState(),
+          client.getState(),
           'membaca status WhatsApp',
         );
         if (whatsappState !== 'CONNECTED') {
           throw new Error(`WhatsApp state ${whatsappState || 'UNKNOWN'}`);
         }
       } catch (error) {
-        this.lastError = error.message;
-        this.recoverClient(error);
+        this.recoverClient(error, true, client);
       }
     }
 
@@ -363,7 +377,7 @@ class WhatsAppService {
       return result;
     } catch (error) {
       if (this.isRecoverableError(error) || error.code === 'WHATSAPP_OPERATION_TIMEOUT') {
-        this.recoverClient(error);
+        this.recoverClient(error, true, client);
         const unavailable = new Error(
           'Koneksi WhatsApp sedang dipulihkan. Coba lagi beberapa saat lagi.',
         );
@@ -411,4 +425,4 @@ class WhatsAppService {
 
 const whatsapp = new WhatsAppService();
 
-module.exports = { whatsapp };
+module.exports = { WhatsAppService, whatsapp };
