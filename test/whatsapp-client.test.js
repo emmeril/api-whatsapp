@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { config } = require('../src/config');
+const { settingsManager } = require('../src/settings');
 const { WhatsAppService } = require('../src/whatsapp/client');
 
 function createReadyService(client) {
@@ -136,14 +136,12 @@ test('mengantrekan request paralel agar pesan dikirim berurutan', async () => {
 });
 
 test('menunggu sisa jeda acak sejak pengiriman sebelumnya', async () => {
-  const originalMin = config.sendDelayMinMs;
-  const originalMax = config.sendDelayMaxMs;
+  const originalSettings = settingsManager.get();
   const originalNow = Date.now;
   const service = new WhatsAppService();
   const waits = [];
 
-  config.sendDelayMinMs = 1000;
-  config.sendDelayMaxMs = 1000;
+  settingsManager.settings = { sendDelayMinMs: 1000, sendDelayMaxMs: 1000 };
   service.lastSendAt = 10000;
   service.sleep = async (ms) => waits.push(ms);
   Date.now = () => 10250;
@@ -151,8 +149,7 @@ test('menunggu sisa jeda acak sejak pengiriman sebelumnya', async () => {
   try {
     await service.waitForSendDelay();
   } finally {
-    config.sendDelayMinMs = originalMin;
-    config.sendDelayMaxMs = originalMax;
+    settingsManager.settings = originalSettings;
     Date.now = originalNow;
   }
 

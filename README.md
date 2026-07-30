@@ -11,6 +11,7 @@ REST API pengiriman WhatsApp bergaya Fonnte yang dibuat dengan Node.js, Express,
 - Autentikasi token melalui header `Authorization`, `token`, atau `x-api-key`
 - Kirim teks, media dari URL, atau file base64
 - Antrean pesan keluar dengan jeda acak yang dapat dikonfigurasi
+- Kontrol perangkat, pengiriman, command, dan delay melalui Telegram
 - Auto-reply command seperti `/start`, dengan respons statis atau webhook dinamis
 - Penyimpanan konfigurasi command secara persisten
 - Normalisasi nomor lokal Indonesia secara otomatis
@@ -152,6 +153,10 @@ dikirim langsung, kemudian pesan berikutnya diberi jeda acak antara
 berlaku ketika beberapa request dikirim bersamaan. Isi kedua nilai dengan `0`
 untuk menonaktifkannya.
 
+Nilai delay juga dapat dibaca dan diperbarui saat aplikasi berjalan melalui
+`GET`/`PUT /api/settings`. Perubahan disimpan ke `.data/settings.json` sehingga
+tetap aktif setelah proses restart.
+
 Contoh respons berhasil:
 
 ```json
@@ -198,6 +203,47 @@ curl -X POST http://localhost:3000/send \
 ```
 
 Ukuran body request dibatasi 25 MB. Untuk file besar, gunakan URL atau sesuaikan limit pada `src/app.js` dengan mempertimbangkan kapasitas server.
+
+## Kontrol melalui Telegram
+
+Kontrol Telegram dikonfigurasi langsung melalui file `.env` `api-whatsapp`:
+
+```env
+TELEGRAM_CONTROL_ENABLED=true
+TELEGRAM_BOT_TOKEN=token-dari-botfather
+TELEGRAM_CHAT_IDS=123456789
+TELEGRAM_API_URL=https://api.telegram.org
+TELEGRAM_POLL_TIMEOUT_SECONDS=25
+```
+
+Jika memakai grup Telegram, isi `TELEGRAM_ADMIN_USER_IDS` untuk membatasi user
+yang boleh menjalankan command. Kode maupun konfigurasi `reminder-bot` tidak
+diubah.
+
+Command yang tersedia:
+
+| Command | Fungsi |
+| --- | --- |
+| `/wa` | Membuka menu tombol kontrol |
+| `/wa_status` | Membaca status perangkat WhatsApp |
+| `/wa_connect` | Memulai koneksi WhatsApp |
+| `/wa_qr` | Mengirim QR login sebagai gambar |
+| `/wa_logout` | Logout dengan konfirmasi |
+| `/wa_send <nomor> <pesan>` | Mengirim pesan teks |
+| `/wa_media <nomor> <url> [caption]` | Mengirim media dari URL |
+| `/wa_document <nomor> <url> [caption]` | Mengirim URL sebagai dokumen |
+| `/wa_file <nomor> [caption]` | Mengirim file/foto Telegram ke WhatsApp |
+| `/wa_settings` | Melihat delay pengiriman |
+| `/wa_delay <min> <max>` | Mengatur delay dalam detik |
+| `/wa_commands` | Melihat command WhatsApp tersimpan |
+| `/wa_command_set <nama> <response>` | Membuat balasan statis |
+| `/wa_command_webhook <nama> <url> [fallback]` | Membuat command webhook |
+| `/wa_command_toggle <nama> on\|off` | Mengaktifkan/nonaktifkan command |
+| `/wa_command_delete <nama>` | Menghapus command dengan konfirmasi |
+
+File Telegram dibatasi 18 MB agar encoding base64 tetap berada di bawah batas
+body request aplikasi. Token Telegram dan token API tidak pernah ditampilkan
+oleh bot.
 
 ## Command dan auto-reply
 
@@ -353,6 +399,8 @@ Kosongkan `MESSAGE_WEBHOOK_URL` untuk mematikan penerusan pesan.
 | POST | `/device/logout` | Logout dan menghapus login aktif |
 | POST | `/send` | Mengirim teks atau media |
 | POST | `/api/messages/send` | Alias endpoint kirim pesan |
+| GET | `/api/settings` | Membaca pengaturan runtime pengiriman |
+| PUT | `/api/settings` | Memperbarui pengaturan runtime pengiriman |
 | GET | `/api/commands` | Melihat seluruh command |
 | GET | `/api/commands/:command` | Melihat satu command |
 | POST | `/api/commands` | Membuat atau memperbarui command |

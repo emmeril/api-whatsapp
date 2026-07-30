@@ -23,11 +23,18 @@ const config = {
   countryCode: (process.env.DEFAULT_COUNTRY_CODE || '62').replace(/\D/g, ''),
   chromeExecutablePath: process.env.CHROME_EXECUTABLE_PATH || undefined,
   commandsFile: path.resolve(process.env.COMMANDS_FILE || '.data/commands.json'),
+  settingsFile: path.resolve(process.env.SETTINGS_FILE || '.data/settings.json'),
   commandWebhookSecret: process.env.COMMAND_WEBHOOK_SECRET || '',
   commandWebhookTimeoutMs: Number(process.env.COMMAND_WEBHOOK_TIMEOUT_MS || 10000),
   messageWebhookUrl: process.env.MESSAGE_WEBHOOK_URL || '',
   messageWebhookSecret: process.env.MESSAGE_WEBHOOK_SECRET || '',
   messageWebhookTimeoutMs: Number(process.env.MESSAGE_WEBHOOK_TIMEOUT_MS || 10000),
+  telegramControlEnabled: parseBoolean(process.env.TELEGRAM_CONTROL_ENABLED, false),
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || '',
+  telegramApiUrl: process.env.TELEGRAM_API_URL || 'https://api.telegram.org',
+  telegramChatIds: process.env.TELEGRAM_CHAT_IDS || '',
+  telegramAdminUserIds: process.env.TELEGRAM_ADMIN_USER_IDS || '',
+  telegramPollTimeoutSeconds: Number(process.env.TELEGRAM_POLL_TIMEOUT_SECONDS || 25),
 };
 
 function validateConfig() {
@@ -97,6 +104,33 @@ function validateConfig() {
 
     if (!['http:', 'https:'].includes(url.protocol)) {
       throw new Error('MESSAGE_WEBHOOK_URL hanya mendukung protokol HTTP atau HTTPS');
+    }
+  }
+
+  if (
+    !Number.isInteger(config.telegramPollTimeoutSeconds)
+    || config.telegramPollTimeoutSeconds < 1
+    || config.telegramPollTimeoutSeconds > 50
+  ) {
+    throw new Error('TELEGRAM_POLL_TIMEOUT_SECONDS harus antara 1 dan 50');
+  }
+
+  if (config.telegramControlEnabled) {
+    if (!config.telegramBotToken) {
+      throw new Error('TELEGRAM_BOT_TOKEN wajib diisi ketika kontrol Telegram aktif');
+    }
+    if (!config.telegramChatIds.trim()) {
+      throw new Error('TELEGRAM_CHAT_IDS wajib diisi ketika kontrol Telegram aktif');
+    }
+
+    let telegramApiUrl;
+    try {
+      telegramApiUrl = new URL(config.telegramApiUrl);
+    } catch {
+      throw new Error('TELEGRAM_API_URL tidak valid');
+    }
+    if (!['http:', 'https:'].includes(telegramApiUrl.protocol)) {
+      throw new Error('TELEGRAM_API_URL hanya mendukung protokol HTTP atau HTTPS');
     }
   }
 }

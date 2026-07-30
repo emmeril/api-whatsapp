@@ -3,6 +3,7 @@ const QRCode = require('qrcode');
 
 const { config } = require('../config');
 const { commandManager } = require('../commands');
+const { settingsManager } = require('../settings');
 const { MessageWebhook } = require('./message-webhook');
 
 const messageWebhook = new MessageWebhook({
@@ -343,8 +344,7 @@ class WhatsAppService {
   }
 
   getRandomSendDelayMs() {
-    const min = config.sendDelayMinMs;
-    const max = config.sendDelayMaxMs;
+    const { sendDelayMinMs: min, sendDelayMaxMs: max } = settingsManager.get();
     if (max <= min) return min;
     return min + Math.floor(Math.random() * (max - min + 1));
   }

@@ -1,5 +1,6 @@
 const { app } = require('./app');
 const { config, validateConfig } = require('./config');
+const { telegramControlBot } = require('./telegram/control-bot');
 const { whatsapp } = require('./whatsapp/client');
 
 validateConfig();
@@ -12,12 +13,17 @@ const server = app.listen(config.port, () => {
       console.error('Koneksi WhatsApp otomatis gagal:', error);
     });
   }
+
+  telegramControlBot.start().catch((error) => {
+    console.error('Kontrol Telegram gagal dimulai:', error.message);
+  });
 });
 
 async function shutdown(signal) {
   console.log(`${signal} diterima, menutup aplikasi...`);
   server.close(async () => {
     try {
+      await telegramControlBot.stop();
       await whatsapp.destroy();
       process.exit(0);
     } catch (error) {
