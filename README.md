@@ -10,6 +10,7 @@ REST API pengiriman WhatsApp bergaya Fonnte yang dibuat dengan Node.js, Express,
 - Status perangkat, connect, dan logout
 - Autentikasi token melalui header `Authorization`, `token`, atau `x-api-key`
 - Kirim teks, media dari URL, atau file base64
+- Antrean pesan keluar dengan jeda acak yang dapat dikonfigurasi
 - Auto-reply command seperti `/start`, dengan respons statis atau webhook dinamis
 - Penyimpanan konfigurasi command secara persisten
 - Normalisasi nomor lokal Indonesia secara otomatis
@@ -35,6 +36,8 @@ RECONNECT_BASE_DELAY_MS=5000
 RECONNECT_MAX_DELAY_MS=60000
 WATCHDOG_INTERVAL_MS=30000
 WHATSAPP_OPERATION_TIMEOUT_MS=30000
+SEND_DELAY_MIN_MS=1000
+SEND_DELAY_MAX_MS=3000
 ```
 
 Jalankan API:
@@ -142,6 +145,12 @@ curl -X POST http://localhost:3000/send \
 ```
 
 Endpoint alternatifnya adalah `POST /api/messages/send`.
+
+Semua pesan yang dikirim lewat endpoint masuk ke satu antrean. Pesan pertama
+dikirim langsung, kemudian pesan berikutnya diberi jeda acak antara
+`SEND_DELAY_MIN_MS` dan `SEND_DELAY_MAX_MS` (default 1-3 detik). Jeda tetap
+berlaku ketika beberapa request dikirim bersamaan. Isi kedua nilai dengan `0`
+untuk menonaktifkannya.
 
 Contoh respons berhasil:
 

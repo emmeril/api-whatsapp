@@ -24,6 +24,8 @@ class WhatsAppService {
     this.watchdogRunning = false;
     this.recoveryPromise = null;
     this.desiredRunning = false;
+    this.sendQueue = Promise.resolve();
+    this.lastSendAt = null;
   }
 
   isRecoverableError(error) {
@@ -119,6 +121,7 @@ class WhatsAppService {
     this.status = 'DISCONNECTED';
     this.qrDataUrl = null;
     this.lastError = error?.message || String(error);
+    this.lastSendAt = null;
 
     if (this.recoveryPromise) return;
     if (!brokenClient) {
@@ -339,7 +342,26 @@ class WhatsAppService {
     }
   }
 
-  async send({ chatId, message, media }) {
+  getRandomSendDelayMs() {
+    const min = config.sendDelayMinMs;
+    const max = config.sendDelayMaxMs;
+    if (max <= min) return min;
+    return min + Math.floor(Math.random() * (max - min + 1));
+  }
+
+  sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async waitForSendDelay() {
+    if (this.lastSendAt === null) return;
+
+    const elapsed = Math.max(0, Date.now() - this.lastSendAt);
+    const remaining = Math.max(0, this.getRandomSendDelayMs() - elapsed);
+    if (remaining > 0) await this.sleep(remaining);
+  }
+
+  async sendQueued({ chatId, message, media }) {
     this.requireReady();
     const client = this.client;
 
@@ -363,11 +385,15 @@ class WhatsAppService {
 
         if (media.filename) messageMedia.filename = media.filename;
 
+        await this.waitForSendDelay();
+        this.lastSendAt = Date.now();
         result = await this.withTimeout(client.sendMessage(chatId, messageMedia, {
           caption: message || undefined,
           sendMediaAsDocument: Boolean(media.asDocument),
         }), 'mengirim media WhatsApp');
       } else {
+        await this.waitForSendDelay();
+        this.lastSendAt = Date.now();
         result = await this.withTimeout(
           client.sendMessage(chatId, message),
           'mengirim pesan WhatsApp',
@@ -389,6 +415,16 @@ class WhatsAppService {
     }
   }
 
+  async send(payload) {
+    this.requireReady();
+
+    // Serialisasi ini juga berlaku untuk beberapa request HTTP yang masuk
+    // bersamaan, sehingga jeda acak benar-benar berada antar pesan.
+    const operation = this.sendQueue.then(() => this.sendQueued(payload));
+    this.sendQueue = operation.catch(() => {});
+    return operation;
+  }
+
   registerCommand(command, handler) {
     return commandManager.registerHandler(command, handler);
   }
@@ -401,6 +437,7 @@ class WhatsAppService {
 
     if (!this.client) {
       this.status = 'DISCONNECTED';
+      this.lastSendAt = null;
       return;
     }
 
@@ -410,6 +447,7 @@ class WhatsAppService {
     this.status = 'DISCONNECTED';
     this.qrDataUrl = null;
     this.initializePromise = null;
+    this.lastSendAt = null;
   }
 
   async destroy() {
@@ -420,6 +458,7 @@ class WhatsAppService {
     if (this.client) await this.client.destroy();
     this.client = null;
     this.status = 'DISCONNECTED';
+    this.lastSendAt = null;
   }
 }
 

@@ -1,7 +1,15 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
+const { config } = require('../src/config');
 const { WhatsAppService } = require('../src/whatsapp/client');
+
+function createReadyService(client) {
+  const service = new WhatsAppService();
+  service.client = client;
+  service.status = 'READY';
+  return service;
+}
 
 test('recovery menutup client lama sebelum menjadwalkan reconnect', async () => {
   const service = new WhatsAppService();
@@ -92,4 +100,80 @@ test('recovery dari client lama tidak memutus client baru', () => {
 
   assert.equal(service.client, newClient);
   assert.equal(service.status, 'READY');
+});
+
+test('mengantrekan request paralel agar pesan dikirim berurutan', async () => {
+  let releaseFirstSend;
+  const events = [];
+  const firstSendPending = new Promise((resolve) => {
+    releaseFirstSend = resolve;
+  });
+  const service = createReadyService({
+    isRegisteredUser: async () => true,
+    sendMessage: async (chatId, message) => {
+      events.push(`start:${message}`);
+      if (message === 'pertama') await firstSendPending;
+      events.push(`finish:${message}`);
+      return { chatId };
+    },
+  });
+  service.waitForSendDelay = async () => {};
+
+  const first = service.send({ chatId: '1@c.us', message: 'pertama' });
+  const second = service.send({ chatId: '2@c.us', message: 'kedua' });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, ['start:pertama']);
+
+  releaseFirstSend();
+  await Promise.all([first, second]);
+  assert.deepEqual(events, [
+    'start:pertama',
+    'finish:pertama',
+    'start:kedua',
+    'finish:kedua',
+  ]);
+});
+
+test('menunggu sisa jeda acak sejak pengiriman sebelumnya', async () => {
+  const originalMin = config.sendDelayMinMs;
+  const originalMax = config.sendDelayMaxMs;
+  const originalNow = Date.now;
+  const service = new WhatsAppService();
+  const waits = [];
+
+  config.sendDelayMinMs = 1000;
+  config.sendDelayMaxMs = 1000;
+  service.lastSendAt = 10000;
+  service.sleep = async (ms) => waits.push(ms);
+  Date.now = () => 10250;
+
+  try {
+    await service.waitForSendDelay();
+  } finally {
+    config.sendDelayMinMs = originalMin;
+    config.sendDelayMaxMs = originalMax;
+    Date.now = originalNow;
+  }
+
+  assert.deepEqual(waits, [750]);
+});
+
+test('kegagalan satu pesan tidak menghentikan antrean berikutnya', async () => {
+  const sent = [];
+  const service = createReadyService({
+    isRegisteredUser: async (chatId) => chatId !== 'invalid@c.us',
+    sendMessage: async (chatId, message) => {
+      sent.push({ chatId, message });
+      return {};
+    },
+  });
+  service.waitForSendDelay = async () => {};
+
+  const failed = service.send({ chatId: 'invalid@c.us', message: 'gagal' });
+  const succeeded = service.send({ chatId: 'valid@c.us', message: 'lanjut' });
+
+  await assert.rejects(failed, (error) => error.code === 'NUMBER_NOT_REGISTERED');
+  await succeeded;
+  assert.deepEqual(sent, [{ chatId: 'valid@c.us', message: 'lanjut' }]);
 });

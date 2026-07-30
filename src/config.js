@@ -17,6 +17,9 @@ const config = {
   reconnectMaxDelayMs: Number(process.env.RECONNECT_MAX_DELAY_MS || 60000),
   watchdogIntervalMs: Number(process.env.WATCHDOG_INTERVAL_MS || 30000),
   whatsappOperationTimeoutMs: Number(process.env.WHATSAPP_OPERATION_TIMEOUT_MS || 30000),
+  // Pesan keluar diantrekan dan diberi jeda acak agar tidak dikirim bersamaan.
+  sendDelayMinMs: Number(process.env.SEND_DELAY_MIN_MS || 1000),
+  sendDelayMaxMs: Number(process.env.SEND_DELAY_MAX_MS || 3000),
   countryCode: (process.env.DEFAULT_COUNTRY_CODE || '62').replace(/\D/g, ''),
   chromeExecutablePath: process.env.CHROME_EXECUTABLE_PATH || undefined,
   commandsFile: path.resolve(process.env.COMMANDS_FILE || '.data/commands.json'),
@@ -49,6 +52,19 @@ function validateConfig() {
     if (!Number.isInteger(value) || value < 100) {
       throw new Error(`${name} harus berupa angka minimal 100`);
     }
+  }
+
+  for (const [name, value] of [
+    ['SEND_DELAY_MIN_MS', config.sendDelayMinMs],
+    ['SEND_DELAY_MAX_MS', config.sendDelayMaxMs],
+  ]) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`${name} harus berupa bilangan bulat tidak negatif`);
+    }
+  }
+
+  if (config.sendDelayMaxMs < config.sendDelayMinMs) {
+    throw new Error('SEND_DELAY_MAX_MS tidak boleh lebih kecil dari SEND_DELAY_MIN_MS');
   }
 
   if (config.reconnectMaxDelayMs < config.reconnectBaseDelayMs) {
